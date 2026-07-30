@@ -41,8 +41,8 @@ def generate_pdf_report(tickers, weights, start, end, port_val, conf_level, stat
     pdf.cell(0, 8, f"Historical VaR: {risk['hist_var_pct']:.2%} (${risk['hist_var_usd']:,.2f})", 0, 1)
     pdf.cell(0, 8, f"Expected Shortfall (CVaR): {risk['es_pct']:.2%} (${risk['es_usd']:,.2f})", 0, 1)
     
-    # Modern fpdf2 outputs bytes directly using output() without destination parameters
-    return pdf.output()
+    # Explicitly cast the output buffer to standard bytes for Streamlit
+    return bytes(pdf.output())
 
 def generate_csv(drawdown_df: pd.DataFrame) -> bytes:
     return drawdown_df.to_csv().encode('utf-8')
