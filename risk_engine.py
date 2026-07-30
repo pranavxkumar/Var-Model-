@@ -17,15 +17,27 @@ class RiskEngine:
         self.port_returns = pd.Series(dtype=float)
         
     def fetch_and_process_data(self):
-        """Downloads data and computes log returns."""
-        data = yf.download(self.tickers, start=self.start_date, end=self.end_date)['Adj Close']
+        """Downloads data and computes log returns safely with multi-ticker support."""
+        data = yf.download(self.tickers, start=self.start_date, end=self.end_date, auto_adjust=False)
         
-        # Handle single ticker edge case
-        if isinstance(data, pd.Series):
-            data = data.to_frame(name=self.tickers[0])
+        # Extract 'Adj Close' safely depending on yfinance return structure
+        if isinstance(data.columns, pd.MultiIndex):
+            if 'Adj Close' in data.columns.levels[0]:
+                prices = data['Adj Close']
+            else:
+                prices = data['Close']
+        else:
+            prices = data[['Adj Close']] if 'Adj Close' in data.columns else data[['Close']]
+
+        # Handle single ticker edge case or multi-column dataframes
+        if isinstance(prices, pd.Series):
+            prices = prices.to_frame(name=self.tickers[0])
             
-        self.prices = data.ffill().dropna()
+        self.prices = prices.ffill().dropna()
         self.returns = np.log(self.prices / self.prices.shift(1)).dropna()
+        
+        # Ensure alignment between weights and return columns
+        self.returns = self.returns[self.tickers]
         self.port_returns = self.returns.dot(self.weights)
         
     def get_portfolio_stats(self):
@@ -33,13 +45,11 @@ class RiskEngine:
         TRADING_DAYS = 252
         annual_return = self.port_returns.mean() * TRADING_DAYS
         
-        # Portfolio Variance using Covariance Matrix
         cov_matrix_daily = self.returns.cov()
         cov_matrix_annual = cov_matrix_daily * TRADING_DAYS
         port_variance = np.dot(self.weights.T, np.dot(cov_matrix_annual, self.weights))
         annual_volatility = np.sqrt(port_variance)
         
-        # Sharpe Ratio
         sharpe_ratio = (annual_return - self.risk_free_rate) / annual_volatility
         
         return {
@@ -56,14 +66,11 @@ class RiskEngine:
         mu = np.mean(self.port_returns)
         sigma = np.std(self.port_returns)
         
-        # Parametric VaR
         z_score = norm.ppf(alpha)
         param_var_pct = -(mu + z_score * sigma)
         
-        # Historical VaR
         hist_var_pct = -np.percentile(self.port_returns, alpha * 100)
         
-        # Expected Shortfall (CVaR)
         tail_losses = self.port_returns[self.port_returns <= -hist_var_pct]
         es_pct = -tail_losses.mean() if len(tail_losses) > 0 else hist_var_pct
         
